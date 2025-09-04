@@ -11,6 +11,8 @@ import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import { PrismaClient } from "@prisma/client";
 
+import { parseScene } from "./utils/fountainParser";
+
 
 const app = express();
 app.use(cors());
@@ -105,8 +107,80 @@ app.get("/api/projects/:id/scripts", async (req, res) => {
     const all = await prisma.script.findMany({ select: { id: true, projectId: true, title: true } });
     res.json(all);
   });
-  
-  
+
+app.post("/api/scripts/:id/parse", async (req: Request, res: Response) => {
+    try {
+        const script = await prisma.script.findUnique({
+            where: { id: req.params.id }
+        });
+        if (!script) {
+            return res.status(404).json({
+                error: "Script not found!",
+            });
+        }
+
+        const parsed = parseScene(script.rawText);
+
+        // Save Scenes to DB
+        const scenes = await prisma.$transaction(
+            parsed.map(scene => {
+                return prisma.scene.create({
+                    data: {
+                        scriptId: script.id,
+                        index: scene.index,
+                        slugIntExt: scene.slug.split(".")[0], // quick hack
+                        slugLocation: scene.slug,
+                        lineCount: scene.body.split("\n").length,
+                    }
+                })
+            })
+        );
+        res.json({ count: scenes.length, scenes });
+    } catch(err) {
+        console.error("parse error", err);
+        res.status(500).json({ error: "Server error" });
+    }
+});
+
+app.get("/api/scripts/:id/scenes", async (req: Request, res: Response) => {
+    try {
+        const scriptId = req.params.id;
+
+        const scenes = await prisma.scene.findMany({
+            where: { scriptId },
+            orderBy: { index: "asc" },
+            select: {
+                id: true,
+                index: true,
+                slugIntExt: true,
+                slugLocation: true,
+                slugTimeOfDay: true,
+                lineCount: true,
+            }
+        });
+        // format a compact “slugline” field for UI
+        const formatted = scenes.map(s => ({
+            id: s.id,
+            index: s.index,
+            slugline: [
+            s.slugIntExt?.toUpperCase(),
+            s.slugLocation,
+            s.slugTimeOfDay?.toUpperCase()
+            ].filter(Boolean).join(" - "),
+            lineCount: s.lineCount ?? 0,
+            meta: {
+            intExt: s.slugIntExt ?? null,
+            location: s.slugLocation ?? null,
+            timeOfDay: s.slugTimeOfDay ?? null,
+            }
+        }));
+    
+        res.json({ count: formatted.length, scenes: formatted });
+    } catch(err) {
+        console.error("get scenes error:", err);
+        res.status(500).json({ error: "Server error" });
+    }
+});
 
 
 app.use((err: any,_req: Request, res: Response, _next: NextFunction) => {

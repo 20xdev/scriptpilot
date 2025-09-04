@@ -22,4 +22,16 @@ model Script {
   rawText   String
   format    String   // 'fountain' | 'txt'
   createdAt DateTime @default(now())
+  scenes    Scene[]  // <— relation to Scene
+}
+
+model Scene {
+  id            String  @id @default(cuid())
+  script        Script  @relation(fields: [scriptId], references: [id])
+  scriptId      String
+  index         Int
+  slugIntExt    String?
+  slugLocation  String?
+  slugTimeOfDay String?
+  lineCount     Int?
 }
