@@ -179,6 +179,25 @@ app.get("/api/scripts/:id/scenes", async (req, res) => {
   
     res.json({ count: formatted.length, scenes: formatted });
   });
+
+app.get("/api/scenes/:sceneId", async (req, res) => {
+    const s = await prisma.scene.findUnique({
+        where: {
+            id: req.params.sceneId,
+        },
+        select: {
+            id: true,
+            index: true,
+            slugIntExt: true,
+            slugLocation: true,
+            slugTimeOfDay: true, 
+            lineCount: true, 
+            body: true ,
+        },
+    });
+    if (!s) return res.status(404).json({ error: "Not found" });
+    res.json(s);
+});
   
 
 
