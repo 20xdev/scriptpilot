@@ -11,7 +11,7 @@ import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import { PrismaClient } from "@prisma/client";
 
-import { parseScene } from "./utils/fountainParser";
+import { parseScenes } from "./utils/fountainParser";
 
 
 const app = express();
@@ -119,19 +119,23 @@ app.post("/api/scripts/:id/parse", async (req: Request, res: Response) => {
             });
         }
 
-        const parsed = parseScene(script.rawText);
+        const parsed = parseScenes(script.rawText);
+
+        await prisma.scene.deleteMany({ where: { scriptId: script.id } });
 
         // Save Scenes to DB
         const scenes = await prisma.$transaction(
-            parsed.map(scene => {
+            parsed.map(s => {
                 return prisma.scene.create({
                     data: {
                         scriptId: script.id,
-                        index: scene.index,
-                        slugIntExt: scene.slug.split(".")[0], // quick hack
-                        slugLocation: scene.slug,
-                        lineCount: scene.body.split("\n").length,
-                    }
+                        index: s.index,
+                        slugIntExt: s.intExt ?? null,
+                        slugLocation: s.location ?? null,
+                        slugTimeOfDay: s.timeOfDay ?? null,
+                        lineCount: s.body ? s.body.split(/\r?\n/).filter(Boolean).length : 0,
+                        body: s.body ?? null,
+                      },
                 })
             })
         );
@@ -142,45 +146,40 @@ app.post("/api/scripts/:id/parse", async (req: Request, res: Response) => {
     }
 });
 
-app.get("/api/scripts/:id/scenes", async (req: Request, res: Response) => {
-    try {
-        const scriptId = req.params.id;
-
-        const scenes = await prisma.scene.findMany({
-            where: { scriptId },
-            orderBy: { index: "asc" },
-            select: {
-                id: true,
-                index: true,
-                slugIntExt: true,
-                slugLocation: true,
-                slugTimeOfDay: true,
-                lineCount: true,
-            }
-        });
-        // format a compact “slugline” field for UI
-        const formatted = scenes.map(s => ({
-            id: s.id,
-            index: s.index,
-            slugline: [
-            s.slugIntExt?.toUpperCase(),
-            s.slugLocation,
-            s.slugTimeOfDay?.toUpperCase()
-            ].filter(Boolean).join(" - "),
-            lineCount: s.lineCount ?? 0,
-            meta: {
-            intExt: s.slugIntExt ?? null,
-            location: s.slugLocation ?? null,
-            timeOfDay: s.slugTimeOfDay ?? null,
-            }
-        }));
-    
-        res.json({ count: formatted.length, scenes: formatted });
-    } catch(err) {
-        console.error("get scenes error:", err);
-        res.status(500).json({ error: "Server error" });
-    }
-});
+app.get("/api/scripts/:id/scenes", async (req, res) => {
+    const includeBody = req.query.includeBody === "1";
+  
+    const scenes = await prisma.scene.findMany({
+      where: { scriptId: req.params.id },
+      orderBy: { index: "asc" },
+      select: {
+        id: true,
+        index: true,
+        slugIntExt: true,
+        slugLocation: true,
+        slugTimeOfDay: true,
+        lineCount: true,
+        ...(includeBody ? { body: true } : {}),  // <— add
+      },
+    });
+  
+    const formatted = scenes.map((s: any) => ({
+      id: s.id,
+      index: s.index,
+      slugline: [s.slugIntExt?.toUpperCase(), s.slugLocation, s.slugTimeOfDay?.toUpperCase()]
+        .filter(Boolean).join(" - "),
+      lineCount: s.lineCount ?? 0,
+      meta: {
+        intExt: s.slugIntExt ?? null,
+        location: s.slugLocation ?? null,
+        timeOfDay: s.slugTimeOfDay ?? null,
+      },
+      ...(includeBody ? { body: s.body ?? "" } : {}), // <— add
+    }));
+  
+    res.json({ count: formatted.length, scenes: formatted });
+  });
+  
 
 
 app.use((err: any,_req: Request, res: Response, _next: NextFunction) => {
